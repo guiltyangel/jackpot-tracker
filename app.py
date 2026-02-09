@@ -1,36 +1,29 @@
 import streamlit as st
-from jackpot_tracker import process_buy_rips_event
+from jackpot_tracker import scan_latest_jackpot_packs
 
-st.set_page_config(page_title="Jackpot-500 Tracker", layout="centered")
+st.set_page_config(page_title="Jackpot-500 Scanner", layout="centered")
 
-st.title("🎰 Jackpot-500 Reward Tracker (Base)")
-st.markdown("Scan **jackpot-500 pack** reward from a buy transaction")
+st.title("🎰 Jackpot-500 Pack Scanner (Base)")
+st.markdown("Scan backward until enough **jackpot-500 packs** are found")
 
-buy_tx = st.text_input("Buy Transaction Hash")
-buy_block = st.number_input("Buy Block Number", min_value=0, step=1)
+target_count = st.number_input(
+    "Number of jackpot-500 packs to scan",
+    min_value=1,
+    step=1
+)
 
-if st.button("Scan Pack"):
-    if not buy_tx or not buy_block:
-        st.error("Please fill all fields.")
-    else:
-        with st.spinner("Scanning Base blocks..."):
-            try:
-                # buyer is auto-detected inside tracker in next version
-                result = process_buy_rips_event(
-                    buy_tx_hash=buy_tx,
-                    buyer_address="",  # placeholder (will auto-detect next step)
-                    buy_block=int(buy_block)
-                )
+if st.button("Start Scan"):
+    with st.spinner("Scanning backward from latest block..."):
+        try:
+            results = scan_latest_jackpot_packs(
+                target_count=int(target_count)
+            )
 
-                st.success("Scan completed")
-                st.json(result)
+            st.success(f"Found {len(results)} jackpot-500 packs")
 
-                reward = result.get("reward")
-                if reward:
-                    st.subheader("Reward Tokens")
-                    st.table(reward["reward_tokens"])
-                else:
-                    st.warning("Reward not found yet.")
+            for i, r in enumerate(results, 1):
+                st.subheader(f"Pack #{i}")
+                st.json(r)
 
-            except Exception as e:
-                st.error(str(e))
+        except Exception as e:
+            st.error(str(e))
