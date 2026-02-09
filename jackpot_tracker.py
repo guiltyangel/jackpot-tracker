@@ -13,9 +13,9 @@ RIPS_MANAGER = "0x7f84b6cd975db619e3f872e3f8734960353c7a09".lower()
 
 PACK_TYPE_TARGET = "jackpot-500"
 
-REQUEST_DELAY = 0.25          # throttle
-MAX_LOOKAHEAD_BLOCKS = 50     # payout delay tolerance
-MAX_SCAN_BLOCKS = 8000        # safety cap
+REQUEST_DELAY = 0.3
+MAX_LOOKAHEAD_BLOCKS = 50
+MAX_SCAN_BLOCKS = 8000
 
 # ============================================================
 # HTTP HELPERS
@@ -27,27 +27,15 @@ def _get(url: str) -> Dict:
     r.raise_for_status()
     return r.json()
 
-def _post(payload: Dict) -> Dict:
-    time.sleep(REQUEST_DELAY)
-    r = requests.post(
-        BASE_BLOCKSCOUT_API,
-        json=payload,
-        timeout=30
-    )
-    r.raise_for_status()
-    return r.json()
-
 # ============================================================
-# BLOCK HELPERS (JSON-RPC – FIX 400 ERROR)
+# LATEST BLOCK (STABLE METHOD)
 # ============================================================
 
 def get_latest_block() -> int:
     """
-    Get latest block number via latest token transfer
-    (Stable method on Blockscout Base – no 400/422)
+    Get latest block via most recent token transfer
+    (Most stable method on Blockscout Base)
     """
-    time.sleep(REQUEST_DELAY)
-
     url = (
         f"{BASE_BLOCKSCOUT_API}"
         f"?module=account"
@@ -58,16 +46,17 @@ def get_latest_block() -> int:
         f"&sort=desc"
     )
 
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
-
-    data = r.json()
+    data = _get(url)
     items = data.get("result", [])
 
     if not items:
-        raise RuntimeError("No token transfers found to determine latest block")
+        raise RuntimeError("Cannot determine latest block")
 
     return int(items[0]["blockNumber"])
+
+# ============================================================
+# BLOCKSCOUT HELPERS
+# ============================================================
 
 def get_tx_token_transfers(tx_hash: str) -> List[Dict]:
     data = _get(
@@ -108,11 +97,12 @@ def is_buy_jackpot_tx(tx_hash: str, buyer: str) -> bool:
     transfers = get_tx_token_transfers(tx_hash)
 
     usdc_ok = any(
-        t["tokenAddress"].lower() == USDC_ADDRESS
-        and t["from"].lower() == buyer
-        and t["to"].lower() == RIPS_MANAGER
+        t.get("tokenAddress", "").lower() == USDC_ADDRESS
+        and t.get("from", "").lower() == buyer
+        and t.get("to", "").lower() == RIPS_MANAGER
         for t in transfers
     )
+
     if not usdc_ok:
         return False
 
@@ -137,7 +127,12 @@ def find_reward_payout(
             block
         )
 
-        payouts = [t for t in transfers if t["to"].lower() == buyer]
+        payouts = [
+            t for t in transfers
+            if t.get("to", "").lower() == buyer
+            and t.get("tokenAddress")
+        ]
+
         if not payouts:
             continue
 
@@ -145,10 +140,13 @@ def find_reward_payout(
         reward_tokens = []
 
         for t in payouts:
+            if not t.get("tokenDecimal"):
+                continue
+
             amount = int(t["value"]) / (10 ** int(t["tokenDecimal"]))
             reward_tokens.append({
-                "token_symbol": t["tokenSymbol"],
-                "token_address": t["tokenAddress"],
+                "token_symbol": t.get("tokenSymbol"),
+                "token_address": t.get("tokenAddress"),
                 "amount": amount,
                 "raw": t["value"],
                 "decimals": t["tokenDecimal"],
@@ -169,16 +167,12 @@ def find_reward_payout(
     return None
 
 # ============================================================
-# MAIN SCANNER – SCAN BACKWARD UNTIL N PACKS FOUND
+# MAIN SCANNER – BACKWARD UNTIL N PACKS FOUND
 # ============================================================
 
 def scan_latest_jackpot_packs(
     target_count: int
 ) -> List[Dict]:
-    """
-    Scan backward from latest block until target_count
-    jackpot-500 packs are found
-    """
 
     latest_block = get_latest_block()
     results: List[Dict] = []
@@ -194,12 +188,19 @@ def scan_latest_jackpot_packs(
         )
 
         for t in transfers:
-            if t["tokenAddress"].lower() != USDC_ADDRESS:
+            token_address = t.get("tokenAddress")
+            if not token_address:
                 continue
 
-            buyer = t["from"].lower()
-            tx_hash = t["hash"]
-            buy_block = int(t["blockNumber"])
+            if token_address.lower() != USDC_ADDRESS:
+                continue
+
+            buyer = t.get("from", "").lower()
+            tx_hash = t.get("hash")
+            buy_block = int(t.get("blockNumber", 0))
+
+            if not buyer or not tx_hash:
+                continue
 
             if not is_buy_jackpot_tx(tx_hash, buyer):
                 continue
@@ -223,5 +224,3 @@ def scan_latest_jackpot_packs(
             break
 
     return results
-
-
