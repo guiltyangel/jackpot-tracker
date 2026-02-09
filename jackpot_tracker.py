@@ -18,7 +18,7 @@ JACKPOT_EVENT_TOPIC0 = (
 )
 
 REQUEST_DELAY = 0.3
-MAX_LOOKAHEAD_BLOCKS = 50
+MAX_LOOKAHEAD_BLOCKS = 5
 MAX_SCAN_BLOCKS = 8000
 
 # ============================================================
@@ -220,3 +220,4 @@ def scan_latest_jackpot_packs(
             break
 
     return results
+
