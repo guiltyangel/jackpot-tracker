@@ -43,16 +43,31 @@ def _post(payload: Dict) -> Dict:
 
 def get_latest_block() -> int:
     """
-    Get latest block number using Blockscout v2 API (Base compatible)
+    Get latest block number via latest token transfer
+    (Stable method on Blockscout Base – no 400/422)
     """
     time.sleep(REQUEST_DELAY)
 
-    url = "https://base.blockscout.com/api/v2/blocks?limit=1&sort=desc"
+    url = (
+        f"{BASE_BLOCKSCOUT_API}"
+        f"?module=account"
+        f"&action=tokentx"
+        f"&address={RIPS_MANAGER}"
+        f"&page=1"
+        f"&offset=1"
+        f"&sort=desc"
+    )
+
     r = requests.get(url, timeout=30)
     r.raise_for_status()
 
     data = r.json()
-    return int(data["items"][0]["height"])
+    items = data.get("result", [])
+
+    if not items:
+        raise RuntimeError("No token transfers found to determine latest block")
+
+    return int(items[0]["blockNumber"])
 
 def get_tx_token_transfers(tx_hash: str) -> List[Dict]:
     data = _get(
@@ -208,4 +223,5 @@ def scan_latest_jackpot_packs(
             break
 
     return results
+
 
