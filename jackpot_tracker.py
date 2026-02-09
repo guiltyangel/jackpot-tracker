@@ -43,12 +43,11 @@ def _post(payload: Dict) -> Dict:
 
 def get_latest_block() -> int:
     """
-    Get latest block number using Blockscout v2 API
-    (This is the ONLY method that works on Base Blockscout)
+    Get latest block number using Blockscout v2 API (Base compatible)
     """
     time.sleep(REQUEST_DELAY)
 
-    url = "https://base.blockscout.com/api/v2/blocks?type=latest"
+    url = "https://base.blockscout.com/api/v2/blocks?limit=1&sort=desc"
     r = requests.get(url, timeout=30)
     r.raise_for_status()
 
@@ -209,3 +208,4 @@ def scan_latest_jackpot_packs(
             break
 
     return results
+
