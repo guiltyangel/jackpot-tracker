@@ -43,17 +43,17 @@ def _post(payload: Dict) -> Dict:
 
 def get_latest_block() -> int:
     """
-    Get latest block number via JSON-RPC
-    Compatible with Blockscout Base
+    Get latest block number using Blockscout v2 API
+    (This is the ONLY method that works on Base Blockscout)
     """
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "eth_blockNumber",
-        "params": [],
-        "id": 1
-    }
-    data = _post(payload)
-    return int(data["result"], 16)
+    time.sleep(REQUEST_DELAY)
+
+    url = "https://base.blockscout.com/api/v2/blocks?type=latest"
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+
+    data = r.json()
+    return int(data["items"][0]["height"])
 
 def get_tx_token_transfers(tx_hash: str) -> List[Dict]:
     data = _get(
