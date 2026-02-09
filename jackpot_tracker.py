@@ -12,8 +12,10 @@ USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913".lower()
 RIPS_MANAGER = "0x7f84b6cd975db619e3f872e3f8734960353c7a09".lower()
 
 PACK_TYPE_TARGET = "jackpot-500"
-MAX_LOOKAHEAD_BLOCKS = 50
-REQUEST_DELAY = 0.2  # seconds (avoid rate limit)
+
+REQUEST_DELAY = 0.2        # seconds (avoid rate limit)
+MAX_LOOKAHEAD_BLOCKS = 50  # payout delay tolerance
+MAX_SCAN_BLOCKS = 8000     # safety limit for backward scan
 
 # ============================================================
 # HTTP HELPER
@@ -28,6 +30,13 @@ def _get(url: str) -> Dict:
 # ============================================================
 # BLOCKSCOUT HELPERS
 # ============================================================
+
+def get_latest_block() -> int:
+    data = _get(
+        f"{BASE_BLOCKSCOUT_API}"
+        f"?module=proxy&action=eth_blockNumber"
+    )
+    return int(data["result"], 16)
 
 def get_tx_token_transfers(tx_hash: str) -> List[Dict]:
     data = _get(
@@ -59,112 +68,140 @@ def get_address_token_transfers(
     return data.get("result", [])
 
 # ============================================================
-# 1️⃣ BUY RIPS DETECTION
+# BUY JACKPOT-500 DETECTION
 # ============================================================
 
-def is_buy_rips_tx(tx_hash: str, buyer_address: str) -> bool:
-    buyer_address = buyer_address.lower()
+def is_buy_jackpot_tx(tx_hash: str, buyer: str) -> bool:
+    buyer = buyer.lower()
 
-    # Check USDC transfer
+    # Check USDC transfer buyer -> RIPS_MANAGER
     transfers = get_tx_token_transfers(tx_hash)
     usdc_ok = any(
         t["tokenAddress"].lower() == USDC_ADDRESS
-        and t["from"].lower() == buyer_address
+        and t["from"].lower() == buyer
         and t["to"].lower() == RIPS_MANAGER
         for t in transfers
     )
     if not usdc_ok:
         return False
 
-    # Heuristic log check
+    # Heuristic log check for jackpot-500
     logs = get_tx_logs(tx_hash)
     return any(PACK_TYPE_TARGET in str(log).lower() for log in logs)
 
 # ============================================================
-# 2️⃣ REWARD PAYOUT MATCHING
+# REWARD PAYOUT MATCHING
 # ============================================================
 
 def find_reward_payout(
-    buyer_address: str,
+    buyer: str,
     buy_block: int
 ) -> Optional[Dict]:
 
-    buyer_address = buyer_address.lower()
+    buyer = buyer.lower()
 
-    transfers = get_address_token_transfers(
-        RIPS_MANAGER,
-        buy_block + 1,
-        buy_block + MAX_LOOKAHEAD_BLOCKS
-    )
-
-    relevant = [
-        t for t in transfers
-        if t["to"].lower() == buyer_address
-    ]
-
-    if not relevant:
-        return None
-
-    tx_map: Dict[str, List[Dict]] = {}
-    for t in relevant:
-        tx_map.setdefault(t["hash"], []).append(t)
-
-    payout_tx_hash = list(tx_map.keys())[0]
-    reward_transfers = tx_map[payout_tx_hash]
-
-    reward_tokens = []
-    block_numbers = set()
-
-    for t in reward_transfers:
-        amount = int(t["value"]) / (10 ** int(t["tokenDecimal"]))
-        reward_tokens.append({
-            "token_symbol": t["tokenSymbol"],
-            "token_address": t["tokenAddress"],
-            "amount": amount,
-            "amount_raw": t["value"],
-            "decimals": t["tokenDecimal"],
-        })
-        block_numbers.add(int(t["blockNumber"]))
-
-    reward_block = min(block_numbers)
-
-    return {
-        "reward_tx_hash": payout_tx_hash,
-        "reward_block": reward_block,
-        "delay_blocks": reward_block - buy_block,
-        "reward_tokens": reward_tokens,
-        "confidence": (
-            "high" if reward_block - buy_block <= 5
-            else "medium" if reward_block - buy_block <= 20
-            else "low"
+    for block in range(buy_block + 1, buy_block + MAX_LOOKAHEAD_BLOCKS + 1):
+        transfers = get_address_token_transfers(
+            RIPS_MANAGER,
+            block,
+            block
         )
-    }
+
+        relevant = [
+            t for t in transfers
+            if t["to"].lower() == buyer
+        ]
+
+        if not relevant:
+            continue
+
+        tx_map: Dict[str, List[Dict]] = {}
+        for t in relevant:
+            tx_map.setdefault(t["hash"], []).append(t)
+
+        payout_tx = list(tx_map.keys())[0]
+        reward_transfers = tx_map[payout_tx]
+
+        reward_tokens = []
+        for t in reward_transfers:
+            amount = int(t["value"]) / (10 ** int(t["tokenDecimal"]))
+            reward_tokens.append({
+                "token_symbol": t["tokenSymbol"],
+                "token_address": t["tokenAddress"],
+                "amount": amount,
+                "amount_raw": t["value"],
+                "decimals": t["tokenDecimal"],
+            })
+
+        return {
+            "reward_tx_hash": payout_tx,
+            "reward_block": block,
+            "delay_blocks": block - buy_block,
+            "reward_tokens": reward_tokens,
+            "confidence": (
+                "high" if block - buy_block <= 5
+                else "medium" if block - buy_block <= 20
+                else "low"
+            )
+        }
+
+    return None
 
 # ============================================================
-# MAIN PUBLIC FUNCTION (IMPORT THIS)
+# SCANNER: BACKWARD UNTIL N JACKPOT PACKS FOUND
 # ============================================================
 
-def process_buy_rips_event(
-    buy_tx_hash: str,
-    buyer_address: str,
-    buy_block: int
-) -> Dict:
+def scan_latest_jackpot_packs(
+    target_count: int
+) -> List[Dict]:
     """
-    Main entry point used by Streamlit app
+    Scan backward from latest block until target_count jackpot-500 packs are found
     """
 
-    if not is_buy_rips_tx(buy_tx_hash, buyer_address):
-        raise ValueError("Not a valid BUY RIPS (jackpot-500) transaction")
+    latest_block = get_latest_block()
+    results: List[Dict] = []
 
-    reward = find_reward_payout(
-        buyer_address=buyer_address,
-        buy_block=buy_block
-    )
+    scanned_blocks = 0
+    current_block = latest_block
 
-    return {
-        "buy_tx_hash": buy_tx_hash,
-        "buy_block": buy_block,
-        "buyer": buyer_address.lower(),
-        "rips_manager": RIPS_MANAGER,
-        "reward": reward
-    }
+    while current_block > 0 and len(results) < target_count:
+        transfers = get_address_token_transfers(
+            RIPS_MANAGER,
+            current_block,
+            current_block
+        )
+
+        for t in transfers:
+            # candidate buy tx: USDC -> RIPS_MANAGER
+            if t["tokenAddress"].lower() != USDC_ADDRESS:
+                continue
+
+            buyer = t["from"].lower()
+            tx_hash = t["hash"]
+            buy_block = int(t["blockNumber"])
+
+            if not is_buy_jackpot_tx(tx_hash, buyer):
+                continue
+
+            reward = find_reward_payout(
+                buyer=buyer,
+                buy_block=buy_block
+            )
+
+            results.append({
+                "buy_tx_hash": tx_hash,
+                "buy_block": buy_block,
+                "buyer": buyer,
+                "reward": reward
+            })
+
+            if len(results) >= target_count:
+                break
+
+        current_block -= 1
+        scanned_blocks += 1
+
+        if scanned_blocks >= MAX_SCAN_BLOCKS:
+            break
+
+    return results
