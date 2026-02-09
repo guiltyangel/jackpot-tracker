@@ -11,10 +11,14 @@ BASE_BLOCKSCOUT_API = "https://base.blockscout.com/api"
 USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913".lower()
 RIPS_MANAGER = "0x7f84b6cd975db619e3f872e3f8734960353c7a09".lower()
 
-PACK_TYPE_TARGET = "jackpot-500"
+# PackPurchased(address,string,string)
+JACKPOT_EVENT_TOPIC0 = (
+    "0xb46ce08eb89d4239a12b7d0a46b94864"
+    "a9d6875da7b8828f7e0d1e3b058d487c"
+)
 
 REQUEST_DELAY = 0.3
-MAX_LOOKAHEAD_BLOCKS = 10
+MAX_LOOKAHEAD_BLOCKS = 50
 MAX_SCAN_BLOCKS = 8000
 
 # ============================================================
@@ -34,7 +38,7 @@ def _get(url: str) -> Dict:
 def get_latest_block() -> int:
     """
     Get latest block via most recent token transfer
-    (Most stable method on Blockscout Base)
+    (stable on Blockscout Base)
     """
     url = (
         f"{BASE_BLOCKSCOUT_API}"
@@ -45,13 +49,10 @@ def get_latest_block() -> int:
         f"&offset=1"
         f"&sort=desc"
     )
-
     data = _get(url)
     items = data.get("result", [])
-
     if not items:
         raise RuntimeError("Cannot determine latest block")
-
     return int(items[0]["blockNumber"])
 
 # ============================================================
@@ -88,26 +89,31 @@ def get_address_token_transfers(
     return data.get("result", [])
 
 # ============================================================
-# BUY JACKPOT-500 DETECTION
+# BUY JACKPOT PACK DETECTION (EVENT-BASED)
 # ============================================================
 
 def is_buy_jackpot_tx(tx_hash: str, buyer: str) -> bool:
     buyer = buyer.lower()
 
+    # 1) USDC -> RIPS_MANAGER
     transfers = get_tx_token_transfers(tx_hash)
-
     usdc_ok = any(
         t.get("tokenAddress", "").lower() == USDC_ADDRESS
         and t.get("from", "").lower() == buyer
         and t.get("to", "").lower() == RIPS_MANAGER
         for t in transfers
     )
-
     if not usdc_ok:
         return False
 
+    # 2) PackPurchased event (topic0)
     logs = get_tx_logs(tx_hash)
-    return any(PACK_TYPE_TARGET in str(log).lower() for log in logs)
+    for log in logs:
+        topics = log.get("topics", [])
+        if topics and topics[0].lower() == JACKPOT_EVENT_TOPIC0:
+            return True
+
+    return False
 
 # ============================================================
 # REWARD PAYOUT MATCHING
@@ -148,8 +154,6 @@ def find_reward_payout(
                 "token_symbol": t.get("tokenSymbol"),
                 "token_address": t.get("tokenAddress"),
                 "amount": amount,
-                "raw": t["value"],
-                "decimals": t["tokenDecimal"],
             })
 
         return {
@@ -157,11 +161,6 @@ def find_reward_payout(
             "reward_block": block,
             "delay_blocks": block - buy_block,
             "reward_tokens": reward_tokens,
-            "confidence": (
-                "high" if block - buy_block <= 5
-                else "medium" if block - buy_block <= 20
-                else "low"
-            )
         }
 
     return None
@@ -189,10 +188,7 @@ def scan_latest_jackpot_packs(
 
         for t in transfers:
             token_address = t.get("tokenAddress")
-            if not token_address:
-                continue
-
-            if token_address.lower() != USDC_ADDRESS:
+            if not token_address or token_address.lower() != USDC_ADDRESS:
                 continue
 
             buyer = t.get("from", "").lower()
@@ -224,4 +220,3 @@ def scan_latest_jackpot_packs(
             break
 
     return results
-
