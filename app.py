@@ -1,5 +1,5 @@
 import streamlit as st
-from jackpot_scanner import scan_jackpot_packs, normalize_results
+from jackpot_tracker import scan_jackpot_packs, normalize_results
 
 st.set_page_config(
     page_title="Jackpot-500 Dashboard",
@@ -96,3 +96,4 @@ st.dataframe(
 # ============================================================
 
 st.caption("Data source: Base Blockscout | Built with Streamlit")
+
