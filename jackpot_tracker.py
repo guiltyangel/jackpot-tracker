@@ -14,7 +14,7 @@ RIPS_MANAGER = "0x7f84b6cd975db619e3f872e3f8734960353c7a09".lower()
 PACK_TYPE_TARGET = "jackpot-500"
 
 REQUEST_DELAY = 0.3
-MAX_LOOKAHEAD_BLOCKS = 50
+MAX_LOOKAHEAD_BLOCKS = 10
 MAX_SCAN_BLOCKS = 8000
 
 # ============================================================
@@ -224,3 +224,4 @@ def scan_latest_jackpot_packs(
             break
 
     return results
+
