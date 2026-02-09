@@ -34,9 +34,9 @@ def _get(url: str) -> Dict:
 def get_latest_block() -> int:
     data = _get(
         f"{BASE_BLOCKSCOUT_API}"
-        f"?module=proxy&action=eth_blockNumber"
+        f"?module=stats&action=eth_blockNumber"
     )
-    return int(data["result"], 16)
+    return int(data["result"])
 
 def get_tx_token_transfers(tx_hash: str) -> List[Dict]:
     data = _get(
@@ -205,3 +205,4 @@ def scan_latest_jackpot_packs(
             break
 
     return results
+
