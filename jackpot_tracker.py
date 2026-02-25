@@ -10,6 +10,90 @@ BASE_BLOCKSCOUT_API = "https://base.blockscout.com/api"
 USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913".lower()
 RIPS_MANAGER = "0x7f84b6cd975db619e3f872e3f8734960353c7a09".lower()
 
+# Chỉ giữ lại nhận diện qua nội dung Data
+JACKPOT_500_HEX = "6a61636b706f742d353030" # Hex của "jackpot-500"
+
+REQUEST_DELAY = 0.5 
+MAX_RETRIES = 3     
+MAX_LOOKAHEAD_BLOCKS = 50 
+
+# ============================================================
+# HTTP HELPERS
+# ============================================================
+def _get(url: str) -> Dict:
+    for i in range(MAX_RETRIES):
+        try:
+            time.sleep(REQUEST_DELAY)
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.get(url, headers=headers, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except (ReadTimeout, ConnectionError):
+            if i == MAX_RETRIES - 1: raise
+            time.sleep(2)
+    return {}
+
+def get_tx_logs(tx_hash: str) -> List[Dict]:
+    url = f"{BASE_BLOCKSCOUT_API}?module=logs&action=getLogs&txhash={tx_hash}"
+    data = _get(url)
+    result = data.get("result", [])
+    return result if isinstance(result, list) else []
+
+# ============================================================
+# LOGIC: DYNAMIC DATA SCANNING
+# ============================================================
+def is_buy_jackpot_500(tx_hash: str) -> bool:
+    """Quét toàn bộ logs, không quan tâm topic, chỉ tìm chuỗi jackpot-500."""
+    logs = get_tx_logs(tx_hash)
+    for log in logs:
+        # Quét thẳng trong trường 'data' của log
+        data = log.get("data", "").lower()
+        if JACKPOT_500_HEX in data:
+            return True
+    return False
+
+def find_reward_payout(buyer: str, buy_block: int) -> Optional[Dict]:
+    start = buy_block + 1
+    end = buy_block + MAX_LOOKAHEAD_BLOCKS
+    url = (f"{BASE_BLOCKSCOUT_API}?module=account&action=tokentx"
+           f"&address={RIPS_MANAGER}&startblock={start}&endblock={end}&sort=asc")
+    
+    data = _get(url)
+    transfers = data.get("result", [])
+    if not isinstance(transfers, list): return None
+
+    payouts = [t for t in transfers if t.get("to", "").lower() == buyer.lower()]
+    if not payouts: return None
+
+    payout_tx = payouts[0].get("hash")
+    reward_tokens = []
+    for t in payouts:
+        if t.get("hash") == payout_tx:
+            decimal = int(t.get("tokenDecimal", 18))
+            amount = int(t.get("value", 0)) / (10 ** decimal)
+            reward_tokens.append({
+                "token_symbol": t.get("tokenSymbol", "Unknown"),
+                "amount": amount
+            })
+
+    return {
+        "reward_tx_hash": payout_tx,
+        "reward_block": int(payouts[0].get("blockNumber", 0)),
+        "reward_tokens": reward_tokens
+    }
+
+def scan_latest_jackpot_packs(target_count: int) -> List[Dict]:import requests
+import time
+from typing import List, Dict, Optional
+from requests.exceptions import ReadTimeout, ConnectionError
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+BASE_BLOCKSCOUT_API = "https://base.blockscout.com/api"
+USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913".lower()
+RIPS_MANAGER = "0x7f84b6cd975db619e3f872e3f8734960353c7a09".lower()
+
 # Hex của chuỗi "jackpot-500" để nhận diện trong data log
 JACKPOT_500_HEX = "6a61636b706f742d353030" 
 
@@ -128,3 +212,4 @@ def scan_latest_jackpot_packs(target_count: int) -> List[Dict]:
                     if len(results) >= target_count: break
         page += 1
     return results
+
