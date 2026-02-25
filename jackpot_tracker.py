@@ -10,8 +10,6 @@ BASE_BLOCKSCOUT_API = "https://base.blockscout.com/api"
 USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913".lower()
 RIPS_MANAGER = "0x7f84b6cd975db619e3f872e3f8734960353c7a09".lower()
 
-# Topic0 của event RipsPurchased dựa trên ảnh bạn cung cấp
-JACKPOT_EVENT_TOPIC0 = "0xb16657efe1c32e9466b9cad76b02443daaf97b7c78fc84eca8dea2775c0eef7c".lower()
 # Hex của chuỗi "jackpot-500" để nhận diện trong data log
 JACKPOT_500_HEX = "6a61636b706f742d353030" 
 
