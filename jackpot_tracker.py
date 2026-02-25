@@ -1,5 +1,6 @@
 import requests
 import time
+from typing import List, Dict, Optional
 from requests.exceptions import ReadTimeout, ConnectionError
 
 # ============================================================
@@ -181,3 +182,4 @@ def scan_latest_jackpot_packs(target_count: int) -> List[Dict]:
 
 
     return results
+
